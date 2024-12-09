@@ -2,6 +2,7 @@ import os
 import json
 import csv
 import logging
+import uuid
 from collections import Counter
 from bs4 import BeautifulSoup
 import requests
@@ -22,10 +23,12 @@ class LamodaScraper:
             "women_clothes": ["https://www.lamoda.ru/c/355/clothes-zhenskaya-odezhda/?sitelink=topmenuW&l=3", "Woman"]
         }
 
-        self.base_url = self.list_categories["man_shoes"][0]
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36'
         }
+
+        self.namespace = uuid.NAMESPACE_DNS
+
         self.categories_constants = {
         "Блузы и рубашки": [
             "Блузы", "Рубашки","Рубашки с длинным рукавом",
@@ -190,12 +193,12 @@ class LamodaScraper:
                 return category
         return "Не указано"  # Если подкатегория не найдена, возвращаем "Не указано"
 
-    def fetch_page(self, custom_url=None, page_number=0):
+    def fetch_page(self, custom_url, page_number=0):
         # Определяем URL: либо custom_url, либо формируем стандартный
         if page_number == 0:
-            url = custom_url or f"{self.base_url}"
+            url = custom_url
         else:
-            url = custom_url or f"{self.base_url}?page={page_number}"
+            url = f"{custom_url}?page={page_number}"
         try:
             response = requests.get(url, headers=self.headers)
             response.raise_for_status()
@@ -238,8 +241,8 @@ class LamodaScraper:
             logging.warning(f"HTML-код для URL {url} пуст")
             return []
 
-    def parse_count_pages(self):
-        extracted_text = self.fetch_page()
+    def parse_count_pages(self, url):
+        extracted_text = self.fetch_page(url)
         if extracted_text:
             try:
                 start_index = extracted_text.find('"pages":')
@@ -369,9 +372,9 @@ class LamodaScraper:
             print(f"Ошибка при преобразовании JSON: {e}")
             return None
 
-    def get_href_list(self, page=1, href_list=None):
+    def get_href_list(self, url, page=1, href_list=None):
         href_list = href_list or []
-        html = self.fetch_page(None, page)
+        html = self.fetch_page(url, page)
         if html:
             try:
                 soup = BeautifulSoup(html, 'html.parser')
@@ -438,14 +441,12 @@ class LamodaScraper:
         Добавляет ссылки из JSON в существующий и новый CSV-файлы с категориями, тегами, эмбеддингом и источником.
         Обрабатывает только ссылки со статусом "processed: False". После обработки меняет статус на "processed: True".
         """
-
-        # Создаём имя нового CSV-файла с припиской '_temp'
         temp_output_csv = os.path.splitext(output_csv)[0] + '_temp.csv'
 
         # Поля CSV-файла
-        fieldnames = ['Source', 'Source_csv', 'Image_url', 'main_photo', 'Id', 'Gender', 'Category',
-                      'Subcategory', 'Embedding', 'Price', 'Brand', 'Tags']
-        print(main_category)
+        fieldnames = ['Source', 'Source_csv', 'Guid', 'Image_url', 'Main_photo', 'Guid_list', 'Id', 'Gender',
+                      'Category', 'Subcategory', 'Embedding', 'Price', 'Brand', 'Tags']
+
         # Определяем директорию для изображений
         if main_category[1] == "Man":
             images_dir = os.path.join("Photos", "Man", os.path.splitext(output_csv)[0])
@@ -454,7 +455,6 @@ class LamodaScraper:
         else:
             images_dir = os.path.splitext(output_csv)[0]  # Для других категорий
 
-        # Создание директории для изображений, если ещё не существует
         if not os.path.exists(images_dir):
             os.makedirs(images_dir)
 
@@ -464,35 +464,28 @@ class LamodaScraper:
             with open(json_file, 'r', encoding='utf-8') as file:
                 links_data = json.load(file)
 
-        # Выбираем только ссылки с "processed: False"
         unprocessed_links = [entry for entry in links_data.get("links", []) if not entry["processed"]]
 
         # Открываем исходный и новый CSV файлы
         with open(output_csv, 'a', newline='', encoding='utf-8') as old_csvfile, \
                 open(temp_output_csv, 'w', newline='', encoding='utf-8') as new_csvfile:
 
-            # Создаем писателей для обоих файлов
             old_writer = csv.DictWriter(old_csvfile, fieldnames=fieldnames)
             new_writer = csv.DictWriter(new_csvfile, fieldnames=fieldnames)
 
-
-
-            if old_csvfile.tell() == 0:  # tell возвращает 0, если файл пуст
+            if old_csvfile.tell() == 0:
                 old_writer.writeheader()
-            new_writer.writeheader()  # Записываем заголовок в новый файл
+            new_writer.writeheader()
 
-            # Проходимся по каждой новой ссылке
             for link_entry in unprocessed_links:
                 url = link_entry["url"].strip()
 
                 try:
-                    # Получаем атрибуты и изображения для текущей ссылки
                     result = self.get_all_atrib_from_page(url)
                 except Exception as e:
                     logging.error(f"Ошибка при обработке URL {url}: {e}")
                     continue
 
-                # Берём список URL картинок
                 image_urls = result.get('image_urls', [])
                 attributes = result.get('attributes', {})
                 categories = result.get('categories', {})
@@ -500,9 +493,9 @@ class LamodaScraper:
                 price = result['price']
                 brand = result['brand']
 
-                # Записываем данные для каждой картинки
+                guid_list = []
+                embedding_list = []
                 for index, image_url in enumerate(image_urls):
-                    # Загружаем изображение в директорию
                     image_name = image_url.split('/')[-1]
                     image_path = os.path.join(images_dir, image_name)
                     try:
@@ -512,51 +505,53 @@ class LamodaScraper:
                         logging.error(f"Ошибка при скачивании картинки {image_url}: {e}")
                         continue
 
-
-                    # Получаем эмбеддинг через gRPC
                     try:
                         with open(image_path, "rb") as image_file:
                             image_data = image_file.read()
                             embedding_norm = grpc_client.get_embedding(image_name=image_path, image_data=image_data)
+                            embedding_list.append(embedding_norm)
                     except Exception as e:
                         logging.error(f"Ошибка при получении эмбеддинга через gRPC для {image_name}: {e}")
-                        embedding_norm = "Ошибка"
                         continue
 
-                    #embedding_norm = "Ошибка"
+                    embedding_list.append("Ошибка")
+                    # Генерация GUID
+                    guid = str(uuid.uuid3(self.namespace, image_url))
+                    guid_list.append(guid)
 
-                    # Определяем, является ли фото главным
-                    main_photo = index == 0  # Первое фото True, остальные False
+                # Пропускаем ссылку, если количество элементов в списках не совпадает
+                if len(guid_list) != len(embedding_list) or len(image_urls) != len(guid_list):
+                    logging.warning(f"Пропускаем ссылку {url}, так как не все фотографии были обработаны.")
+                    continue
 
-                    # Составляем строку данных
+                # Обработка изображений с учетом главного фото
+                main_photo_guid = guid_list[0] if guid_list else None
+                for index, image_url in enumerate(image_urls):
                     row_data = {
                         'Source': 'Lamoda',
                         'Source_csv': output_csv,
+                        'Guid': guid_list[index],
                         'Image_url': image_url,
-                        'main_photo': main_photo,
+                        'Main_photo': None if index == 0 else main_photo_guid,
+                        'Guid_list': json.dumps(guid_list, ensure_ascii=False),
                         'Id': image_url.split('/')[6].split('_')[0],
                         'Gender': main_category[1],
                         'Category': self.get_category_for_subcategory(subcategory),
                         'Subcategory': subcategory,
-                        'Embedding': embedding_norm,
+                        'Embedding': embedding_list[index] if index < len(embedding_list) else "Ошибка",
                         'Price': price,
                         'Brand': brand,
-                        'Tags': json.dumps(attributes, ensure_ascii=False)  # Конвертируем атрибуты в JSON
+                        'Tags': json.dumps(attributes, ensure_ascii=False)
                     }
-
-                    # Записываем строку в оба CSV файла
                     old_writer.writerow(row_data)
                     new_writer.writerow(row_data)
 
-                # Обновляем статус ссылки на "processed: True"
                 link_entry["processed"] = True
 
-        # Сохраняем обновлённый JSON с обновлёнными статусами
         with open(json_file, 'w', encoding='utf-8') as file:
             json.dump(links_data, file, ensure_ascii=False, indent=4)
         logging.info(f"Данные добавлены в '{output_csv}' и '{temp_output_csv}'")
         print(f"Данные добавлены в '{output_csv}' и '{temp_output_csv}'")
-
 
 
 if __name__ == "__main__":

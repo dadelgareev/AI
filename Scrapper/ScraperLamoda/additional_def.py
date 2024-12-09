@@ -1,4 +1,5 @@
 import json
+import os
 
 from bs4 import BeautifulSoup
 
@@ -180,6 +181,63 @@ def count_and_extract_text_by_class(html, target_class):
 
     return count, texts
 
+def list_json_files(directory):
+    """
+    Возвращает список всех JSON-файлов в указанной директории (без рекурсивного обхода).
+
+    :param directory: Путь к директории для поиска JSON-файлов.
+    :return: Список путей к JSON-файлам.
+    """
+    json_files = []
+    try:
+        for item in os.listdir(directory):
+            full_path = os.path.join(directory, item)
+            if os.path.isfile(full_path) and item.endswith('.json'):
+                json_files.append(full_path)
+    except FileNotFoundError:
+        print(f"Директория '{directory}' не найдена.")
+    except PermissionError:
+        print(f"Нет доступа к директории '{directory}'.")
+    return json_files
+
+
+def check_duplicates_in_json(file_path):
+    """
+    Проверяет JSON-файл на наличие дубликатов по ключу 'url'.
+
+    :param file_path: Путь к JSON-файлу.
+    :return: Список дублирующихся URL.
+    """
+    try:
+        # Открываем и загружаем JSON-файл
+        with open(file_path, 'r', encoding='utf-8') as file:
+            data = json.load(file)
+
+        # Проверяем, что ключ 'links' существует и является списком
+        if 'links' not in data or not isinstance(data['links'], list):
+            print("Некорректная структура JSON: отсутствует ключ 'links' или он не является списком.")
+            return []
+
+        # Проверяем на дубликаты
+        seen_urls = set()
+        duplicates = []
+
+        for item in data['links']:
+            url = item.get('url')
+            if url:
+                if url in seen_urls:
+                    duplicates.append(url)
+                else:
+                    seen_urls.add(url)
+
+        return duplicates
+
+    except FileNotFoundError:
+        print(f"Файл {file_path} не найден.")
+        return []
+    except json.JSONDecodeError as e:
+        print(f"Ошибка декодирования JSON: {e}")
+        return []
 
 def get_category_for_subcategory(subcategory):
     """
@@ -212,8 +270,18 @@ def save_dict_to_json(data_dict, file_name):
 
 # Пример использования функции
 subcategory = "Блузы"  # пример подкатегории
+"""
+
 category = get_category_for_subcategory(subcategory)
 print(category)
 save_dict_to_json(categories_constants,"constant.json")
 scraper = LamodaScraper()
 print(scraper.fetch_page("https://www.lamoda.ru/p/mp002xw173k4/clothes-ostin-zhaket/"))
+"""
+
+# Пример использования:
+project_directory = '.'  # Замените на путь к вашему проекту
+json_files = list_json_files(project_directory)
+print("Найденные JSON-файлы:")
+for json_file in json_files:
+    print(json_file,"Дубликаты: ",check_duplicates_in_json(json_file))
