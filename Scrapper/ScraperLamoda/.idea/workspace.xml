@@ -5,13 +5,13 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="0c8fc8e8-1051-44e7-9424-ae2405eeb260" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/encodings.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/.gitignore" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/ScraperLamoda.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/ScraperLamoda.iml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../../change_vector_pgvector/test_entity_python.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../../test_nesterov/adam.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../../test_nesterov/main2.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../../test_nesterov/momentum.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/LamodaScraperService.py" beforeDir="false" afterPath="$PROJECT_DIR$/LamodaScraperService.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/additional_def.py" beforeDir="false" afterPath="$PROJECT_DIR$/additional_def.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scraper.log" beforeDir="false" afterPath="$PROJECT_DIR$/scraper.log" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scraper.py" beforeDir="false" afterPath="$PROJECT_DIR$/scraper.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -30,15 +30,16 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "Python.LamodaScraperService.executor": "Run",
-    "Python.additional_def.executor": "Run",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "git-widget-placeholder": "main",
-    "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;Python.LamodaScraperService.executor&quot;: &quot;Run&quot;,
+    &quot;Python.additional_def.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/Adel/Ai/Scrapper/ScraperLamoda&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;
   }
-}]]></component>
+}</component>
   <component name="SharedIndexes">
     <attachedChunks>
       <set>

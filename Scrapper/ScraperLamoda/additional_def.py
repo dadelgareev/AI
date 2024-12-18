@@ -270,18 +270,20 @@ def save_dict_to_json(data_dict, file_name):
 
 # Пример использования функции
 subcategory = "Блузы"  # пример подкатегории
-"""
+
 
 category = get_category_for_subcategory(subcategory)
 print(category)
 save_dict_to_json(categories_constants,"constant.json")
+"""
 scraper = LamodaScraper()
 print(scraper.fetch_page("https://www.lamoda.ru/p/mp002xw173k4/clothes-ostin-zhaket/"))
 """
-
+"""
 # Пример использования:
 project_directory = '.'  # Замените на путь к вашему проекту
 json_files = list_json_files(project_directory)
 print("Найденные JSON-файлы:")
 for json_file in json_files:
     print(json_file,"Дубликаты: ",check_duplicates_in_json(json_file))
+"""
