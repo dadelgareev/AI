@@ -392,6 +392,43 @@ def get_embedding_by_product_id(product_id, conn_params):
         cursor.close()
         conn.close()
 
+def clear_viewed_ids_for_user(user_id, conn_params):
+    """
+    Очищает поле viewed_ids для пользователя, устанавливая его в пустой массив.
+
+    :param user_id: ID пользователя
+    :param conn_params: Параметры подключения к базе данных
+    """
+    # Подключение к базе данных
+    conn = psycopg2.connect(**conn_params)
+    cursor = conn.cursor()
+
+    try:
+        # SQL-запрос для очистки viewed_ids
+        query = """
+        UPDATE user_info
+        SET viewed_ids = ARRAY[]::text[]
+        WHERE user_id = %s;
+        """
+
+        # Выполнение запроса
+        cursor.execute(query, (user_id,))
+
+        # Подтверждение изменений
+        conn.commit()
+
+        print(f"Поле viewed_ids очищено для пользователя с ID {user_id}.")
+
+    except Exception as e:
+        # В случае ошибки, откатываем изменения
+        conn.rollback()
+        print(f"Ошибка при очистке поля viewed_ids для пользователя с ID {user_id}: {e}")
+
+    finally:
+        # Закрытие соединения
+        cursor.close()
+        conn.close()
+
 
 def similar_vector_for_user(user_id):
     # Подключение к базе данных
@@ -498,6 +535,71 @@ def fetch_similar_product_for_user_exclude(user_id, conn_params, category, gende
     # Закрытие соединения
     cursor.close()
     conn.close()
+
+def fetch_similar_product_for_user_with_ids(user_id, conn_params, category, gender, similarity_threshold):
+    """
+    Извлекает наиболее похожий товар для пользователя по его preferences_embedding_1,
+    игнорируя идентификаторы товаров, уже просмотренные пользователем (viewed_ids),
+    а также возвращает сам вектор этого товара.
+
+    :param user_id: ID пользователя.
+    :param conn_params: Параметры подключения к базе данных.
+    :param category: Категория товара, по которой будет выполняться поиск.
+    :param gender: Пол, по которому будет выполняться поиск (например, 'Man' или 'Woman').
+    :param similarity_threshold: Порог сходства, ниже которого товары не будут учитываться.
+    :return: Кортеж (similar_id, similar_embedding, similar_image_url) или None, если похожий товар не найден.
+    """
+    # Подключение к базе данных
+    conn = psycopg2.connect(**conn_params)
+    cursor = conn.cursor()
+
+    # Запрос для нахождения похожих товаров и извлечения embedding пользователя,
+    # исключая идентификаторы из viewed_ids.
+    query = """
+    WITH user_embedding AS (
+        SELECT 
+            preferences_embedding_1, 
+            COALESCE(viewed_ids, '{}') AS viewed_ids
+        FROM user_info
+        WHERE user_id = %s
+    )
+    SELECT 
+        p.id AS similar_id,
+        p.embedding AS similar_embedding,
+        p.image_url AS similar_image_url,
+        1 - (ue.preferences_embedding_1 <=> p.embedding) AS similarity
+    FROM 
+        products_all p,
+        user_embedding ue
+    WHERE 
+        p.category = %s
+        AND p.gender = %s
+        AND (1 - (ue.preferences_embedding_1 <=> p.embedding)) >= %s
+        AND p.id::text <> ALL(ue.viewed_ids) -- Исключаем идентификаторы из viewed_ids
+    ORDER BY 
+        similarity DESC
+    LIMIT 1;
+    """
+
+    # Выполнение запроса с параметрами для категории, гендера и порога сходства
+    cursor.execute(query, (user_id, category, gender, similarity_threshold))
+    result = cursor.fetchall()
+
+    # Если результат найден
+    if result:
+        similar_id = result[0][0]  # id товара
+        similar_embedding = result[0][1]  # вектор товара
+        similar_image_url = result[0][2]  # URL изображения товара
+        print(f"Наиболее похожий товар для пользователя ID {user_id}: {similar_id}")
+        return similar_id, similar_embedding, similar_image_url
+    else:
+        print(f"Нет подходящих товаров с похожестью >= {similarity_threshold} для пользователя с ID {user_id}")
+        return None
+
+    # Закрытие соединения
+    cursor.close()
+    conn.close()
+
 
 def fetch_similar_product_for_user(user_id, conn_params, category, gender, similarity_threshold):
     """
@@ -816,6 +918,67 @@ def compute_gradient(user_embedding, item_embedding):
 
     return gradient
 
+def update_user_embeddings_and_viewed_products(user_id, new_user_embedding, new_velocity, category, constant_values, product_id, conn_params):
+    """
+    Обновляет вектора пользователя и добавляет ID товара в массив просмотренных товаров (viewed_ids).
+
+    :param user_id: ID пользователя
+    :param new_user_embedding: Новый вектор пользователя
+    :param new_velocity: Новый вектор старых предпочтений
+    :param category: Категория товара, которая используется для поиска колонок
+    :param constant_values: Словарь с настройками колонок для каждой категории
+    :param product_id: ID товара, который нужно добавить в массив viewed_ids
+    :param conn_params: Параметры подключения к базе данных
+    """
+    # Подключение к базе данных
+    conn = psycopg2.connect(**conn_params)
+    cursor = conn.cursor()
+
+    try:
+        # Получаем имена колонок для embedding и velocity из словаря constant_values
+        column_name_embedding = constant_values.get(category, {}).get("Column_embedding")
+        column_name_velocity = constant_values.get(category, {}).get("Column_velocity")
+
+        # Проверяем, были ли найдены соответствующие колонки
+        if not column_name_embedding or not column_name_velocity:
+            raise ValueError(f"Для категории '{category}' не найдены соответствующие колонки в constant_values.")
+
+        # Преобразуем вектора в строку, чтобы вставить их в базу данных
+        new_user_embedding_str = str(new_user_embedding)
+        new_velocity_str = str(new_velocity)
+
+        # SQL-запрос для обновления векторов пользователя и добавления ID товара в viewed_ids
+        query = f"""
+        UPDATE user_info
+        SET 
+            {column_name_embedding} = %s,
+            {column_name_velocity} = %s,
+            viewed_ids = ARRAY(
+                SELECT DISTINCT e
+                FROM UNNEST(COALESCE(viewed_ids, ARRAY[]::text[])) AS e
+                UNION ALL
+                SELECT %s
+            )
+        WHERE user_id = %s;
+        """
+
+        # Выполнение запроса
+        cursor.execute(query, (new_user_embedding_str, new_velocity_str, str(product_id), user_id))
+
+        # Подтверждение изменений
+        conn.commit()
+
+        print(f"Вектора и просмотренные товары успешно обновлены для пользователя с ID {user_id}. Добавлен товар с ID {product_id}.")
+
+    except Exception as e:
+        # В случае ошибки, откатываем изменения
+        conn.rollback()
+        print(f"Ошибка при обновлении данных для пользователя с ID {user_id}: {e}")
+
+    finally:
+        # Закрытие соединения
+        cursor.close()
+        conn.close()
 
 def insert_user_embeddings(user_id, new_user_embedding, new_velocity, category, constant_values, conn_params):
     """
@@ -914,9 +1077,10 @@ def user_training(user_id, category, gender, learning_rate, momentum, liked, con
     :return: Обновленные векторы пользователя.
     """
 
+    similar_id, similar_embedding, similar_image_url = fetch_similar_product_for_user_with_ids(user_id,conn_params, category, gender, 0.8)
     #similar_id, similar_embedding, similar_image_url = fetch_similar_product_for_user(user_id,conn_params, category, gender, 0.8)
-    similar_id, similar_embedding, similar_image_url = fetch_similar_product_for_user_exclude(user_id, conn_params, category,
-                                                                                      gender, 0.8, [64385,76123,69816,64991,76120,16081,78728,67332])
+    #similar_id, similar_embedding, similar_image_url = fetch_similar_product_for_user_exclude(user_id, conn_params, category,
+    #                                                                                  gender, 0.8, [64385,76123,69816,64991,76120,16081,78728,67332])
     print("Image:", similar_image_url)
     print("Distance: ",compute_distance_user_card(user_id,similar_id,conn_params))
     print(f"Вектор похожей вещи:{similar_embedding}")
@@ -935,11 +1099,11 @@ def user_training(user_id, category, gender, learning_rate, momentum, liked, con
 
 
     print(f"Новый вектор пользователя:{new_user_embedding}")
-    print(f"Новый вектор смещения:{velocity}")
+    print(f"Новый вектор скорости:{new_velocity}")
     print()
     print()
-    insert_user_embeddings(user_id, new_user_embedding, velocity,category, constant_values, conn_params)
-
+    #insert_user_embeddings(user_id, new_user_embedding, new_velocity,category, constant_values, conn_params)
+    update_user_embeddings_and_viewed_products(user_id, new_user_embedding, new_velocity,category, constant_values, similar_id,conn_params)
 def generate_zero_list(length=1000):
     """
     Создаёт список строк, где каждая строка представляет число 0.
@@ -947,7 +1111,7 @@ def generate_zero_list(length=1000):
     :param length: Длина списка.
     :return: Список строк с числом '0'.
     """
-    return ['0' for _ in range(length)]
+    return [0 for _ in range(length)]
 
 
 
@@ -1019,43 +1183,45 @@ def generate_constants_json_for_every_category(file_path, conn_params):
     with open('constants_vectors.json', 'w', encoding='utf-8') as f:
         json.dump(result, f, indent=4, ensure_ascii=False)
 
+if __name__ == "__main__":
 
 
+    #product_vectors = get_product_vectors("Блузы и рубашки", conn_params)
+    #print(product_vectors)
+    # Получаем значимые и незначимые вектора
+    #top_max_n = k_n_important(product_vectors, n=30, k=30)
+    #print(top_max_n)
+    #top_min_k = k_secondary(product_vectors, k=10)
 
-#product_vectors = get_product_vectors("Блузы и рубашки", conn_params)
-#print(product_vectors)
-# Получаем значимые и незначимые вектора
-#top_max_n = k_n_important(product_vectors, n=30, k=30)
-#print(top_max_n)
-#top_min_k = k_secondary(product_vectors, k=10)
+    category = "Блузы и рубашки"
+    gender = "Man"
+    #embedding = (get_average_vector(category, gender, conn_params))
+    #insert_preferences(embedding, embedding, conn_params)
+    #insert_preferences(get_embedding_by_product_id(76123,conn_params),get_embedding_by_product_id(76123,conn_params),conn_params)
+    #similar_vector_for_user(3)
+    #print(get_embedding_by_product_id(76123, conn_params))
+    #print(similar_vector(76123))
+    #calculate_distance_between_cards(76123,69816, conn_params)
+    #print(fetch_vectors_and_compute_gradient(76123, 69816, conn_params))
+    #for i in range(10):
+    #64385
 
-category = "Блузы и рубашки"
-gender = "Man"
-#embedding = (get_average_vector(category, gender, conn_params))
-#insert_preferences(embedding, embedding, conn_params)
-#insert_preferences(get_embedding_by_product_id(76123,conn_params),get_embedding_by_product_id(76123,conn_params),conn_params)
-#similar_vector_for_user(3)
-#print(get_embedding_by_product_id(76123, conn_params))
-#print(similar_vector(76123))
-#calculate_distance_between_cards(76123,69816, conn_params)
-#print(fetch_vectors_and_compute_gradient(76123, 69816, conn_params))
-#for i in range(10):
-#64385
-
-#    user_training(5,0.1,0.1,True,conn_params)
-#    similar_vector_for_user(5)
-#embedding = (get_average_vector(category, gender, conn_params))
-#insert_preferences(embedding, embedding, conn_params)
-#similar_vector_for_user(6)
-#print(get_embedding_by_product_id(75825,conn_params))
-#user_training(6,0.1,0.1,True,conn_params)
-#embed = get_embedding_by_product_id(76123, conn_params)
-#insert_user_embeddings(4,embed,embed,conn_params)
-#add_velocity_fields_to_table("user_info", conn_params)
-#user_training_by_product_id(64385,4,0.1,0.1,False,conn_params)
-print(get_keys_from_json("constant.json"))
-#generate_constants_json_for_every_category("constant.json",conn_params)
-#print(constant_values)
-user_training(4,category,gender,0.1,0.9,True,conn_params)
-
+    #    user_training(5,0.1,0.1,True,conn_params)
+    #    similar_vector_for_user(5)
+    #embedding = (get_average_vector(category, gender, conn_params))
+    #insert_preferences(embedding, embedding, conn_params)
+    #similar_vector_for_user(6)
+    #print(get_embedding_by_product_id(75825,conn_params))
+    #user_training(6,0.1,0.1,True,conn_params)
+    #embed = get_embedding_by_product_id(76123, conn_params)
+    #insert_user_embeddings(4,embed,generate_zero_list(),category,constant_values,conn_params)
+    #clear_viewed_ids_for_user(4, conn_params)
+    #add_velocity_fields_to_table("user_info", conn_params)
+    #user_training_by_product_id(64385,4,0.1,0.1,False,conn_params)
+    print(get_keys_from_json("constant.json"))
+    #generate_constants_json_for_every_category("constant.json",conn_params)
+    #print(constant_values)
+    user_training(4,category,gender,0.01,0.9,True,conn_params)
+    #similar_id, similar_embedding, similar_image_url = fetch_similar_product_for_user_with_ids(4,conn_params, category, gender, 0.8)
+    #print(similar_id)
 
